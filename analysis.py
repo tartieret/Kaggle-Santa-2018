@@ -1,6 +1,6 @@
 """Analysis of a solution"""
 
-from aco import load_cities, INPUT_FILE
+from aco import load_cities, INPUT_FILE, OUTPUT_FILE
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,7 +30,7 @@ def distance(X, Y, primes):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Analyze a solution')
-    parser.add_argument('-f', help='name of the solution file', default="submission.csv", action="store")
+    parser.add_argument('-f', help='name of the solution file', default=OUTPUT_FILE, action="store")
     args = parser.parse_args()
     filename = args.f
 
