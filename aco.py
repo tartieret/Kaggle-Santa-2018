@@ -8,11 +8,6 @@ import math
 import pickle
 import os
 
-from utils import load_cities
-
-INPUT_FILE = "aug_cities.csv"
-OUTPUT_FOLDER = "output"
-OUTPUT_FILE = os.path.join(OUTPUT_FOLDER, "submission.csv")
 RUN_FOLDER = "runs"
 
 # --------------------------------------
@@ -76,9 +71,6 @@ class Ant:
     def get_total_distance(self):
         return self.total_dist
 
-    def get_pheronome_delta(self):
-        return []
-
 
 class ACO:
 
@@ -105,8 +97,9 @@ class ACO:
             L = ant.get_total_distance()
             dep = self.Q/L
             tour = ant.get_tour()
-            for ind, city in enumerate(tour[1:]):
-                self.tau[tour[ind-1]][city] += dep
+            # update the pheronomes
+            self.tau[tour[0:-1], tour[1:]] += dep
+            self.tau[tour[1:], tour[0:-1]] += dep
 
     def select_next_city(self, current_city_id, unvisited, current_step):
         """Select the next city based on the distances and the amount
@@ -119,8 +112,6 @@ class ACO:
         Returns:
             int: id of the next city
         """
-        # TODO: vectorized version
-        transition_prob = np.zeros(len(unvisited))
         i = current_city_id
         x = self.X[i]
         y = self.Y[i]
@@ -130,17 +121,10 @@ class ACO:
             if not self.primes[i]:
                 coeff = 1.1
         # calculate the transition probabilities
-        denominator = 0
-        for m in unvisited:
-            tau_im = self.tau[i][m]
-            d_im = coeff*math.sqrt((x-self.X[m])**2+(y-self.Y[m])**2)
-            denominator += math.pow(tau_im, self.alpha)/math.pow(d_im, self.beta)
-        for ind, j in enumerate(unvisited):
-            # calculate the probability to go from the current city to j
-            tau_ij = self.tau[i][j]
-            d_ij = coeff*math.sqrt((x-self.X[j])**2+(y-self.Y[j])**2)
-            transition_prob[ind] = math.pow(tau_ij, self.alpha)/math.pow(d_ij, self.beta)/denominator
-
+        dist = coeff*np.hypot(self.X[unvisited]-x, self.Y[unvisited]-y)
+        pheronomes = self.tau[i][unvisited]
+        denominator = np.sum(np.power(pheronomes, self.alpha)/np.power(dist, self.beta))
+        transition_prob = 1/denominator*np.power(pheronomes, self.alpha)/np.power(dist, self.beta)
         # select the next city by random roulette
         # and mark the city as visited
         next_city = np.random.choice(unvisited, p=transition_prob)
@@ -156,8 +140,8 @@ class ACO:
         return elites
 
     def solve(self, nb_ants=1, nb_generations=10, nb_elites=4):
-        best_score = float('inf')
-        best_tour = []
+        self.best_score = float('inf')
+        self.best_tour = []
         # initialize the pheronomes
         self.init_pheronomes()
         # initialize a first generation of ants
@@ -170,10 +154,10 @@ class ACO:
                 ) for k in range(0, nb_ants)]
         elites = []
 
-        generation = 0
-        stats = np.zeros((nb_generations, 2))
-        while generation < nb_generations:
-            print('Start generation {}'.format(generation))
+        self.generation = 0
+        self.stats = []
+        while self.generation < nb_generations:
+            print('Generation {}'.format(self.generation))
             # generate a new generation of ants
             # we also keep the elites from the previous generation
             ants = [Ant(
@@ -214,19 +198,21 @@ class ACO:
                     )
             # calculate the ant scores
             current_score = ant.score()
-            if current_score < best_score:
-                improvment = (best_score - current_score)/best_score
-                best_score = current_score
-                best_tour = ant.get_tour()
-                stats[generation] = [best_score, improvment]
+            if current_score < self.best_score:
+                improvment = (self.best_score - current_score)/self.best_score
+                self.best_score = current_score
+                self.best_tour = ant.get_tour()
                 print('GEN {} - Best score: {}, gain: {:.2f}%'.format(
-                    generation, best_score, improvment*100
+                    self.generation, self.best_score, improvment*100
                 ))
 
                 # save the solution
-                pickle.dump(best_tour, open(os.path.join(RUN_FOLDER, 'best_tour_{}.dat'.format(generation)), 'wb'))
+                pickle.dump(self.best_tour, open(os.path.join(RUN_FOLDER, 'best_tour_{}.dat'.format(self.generation)), 'wb'))
                 # save the pheronomes
-                pickle.dump(self.tau, open(os.path.join(RUN_FOLDER, 'tau_{}.dat'.format(generation)), 'wb'))
+                pickle.dump(self.tau, open(os.path.join(RUN_FOLDER, 'tau_{}.dat'.format(self.generation)), 'wb'))
+
+            # record the stats
+            self.stats.append((self.generation, self.best_score, improvment))
 
             # update pheronomes
             self.add_pheronomes(ants+elites)
@@ -240,52 +226,6 @@ class ACO:
             # select the new elites from this generation
             elites = self.select_elites(ants=ants+elites, nb_elites=nb_elites)
 
-            generation += 1
+            self.generation += 1
 
-        return best_tour, best_score, stats
-
-# --------------------------------------
-# Main
-# --------------------------------------
-
-
-if __name__ == '__main__':
-
-    print('*'*60 + '\nKaggle Sant 2018 - ACO\n' + '*'*60)
-
-    ids, X, Y, primes = load_cities(INPUT_FILE)
-
-    # for now reduces to 100 cities
-    ids = ids[0:50]
-    X = X[0:50]
-    Y = Y[0:50]
-    primes = primes[0:50]
-
-    nb_cities = len(X)
-
-    aco = ACO(X, Y, primes,
-        rho=0.4,
-        alpha=1,
-        beta=1.5,
-        Q=20
-    )
-    best_tour, best_score, stats = aco.solve(
-        nb_ants=nb_cities,
-        nb_generations=500,
-        nb_elites=5
-    )
-
-    print('\nBest score: ', best_score)
-
-    # save the best tour to the disk
-    print('\nSave best tour as {}'.format(OUTPUT_FILE))
-    with open(OUTPUT_FILE, 'w') as submission:
-        submission.write('Path\n')
-        for city in best_tour:
-            submission.write('{}\n'.format(city))
-
-    # save the stats
-    with open(os.path.join(OUTPUT_FOLDER, "stats.csv"), 'w') as submission:
-        submission.write('Gen,Score,Gain\n')
-        for i, stat in enumerate(stats):
-            submission.write('{},{},{}\n'.format(i, stat[0], stat[1]))
+        return self.best_tour, self.best_score, self.stats
