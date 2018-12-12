@@ -8,62 +8,12 @@ import math
 import pickle
 import os
 
+from utils import load_cities
+
 INPUT_FILE = "aug_cities.csv"
 OUTPUT_FOLDER = "output"
 OUTPUT_FILE = os.path.join(OUTPUT_FOLDER, "submission.csv")
 RUN_FOLDER = "runs"
-
-# --------------------------------------
-# Utility functions
-# --------------------------------------
-
-def load_cities(filename):
-    """Load the preprocessed list of cities, that already
-    includes the "prime" flag
-
-    Args:
-        filename (str): name of the file to load
-
-    Returns:
-        (numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray): cityID, X, Y and prime flag
-
-    """
-    cities = pd.read_csv(filename)
-    ids = cities.CityId.values
-    X = cities.X.values
-    Y = cities.Y.values
-    primes = cities.is_prime.values
-    print('Load file {} - Found {} cities'.format(
-        filename, len(X)
-    ))
-    return ids, X, Y, primes
-
-
-def distance(X, Y, primes):
-    """Calculate the tour distance - Vectorized implementation
-
-    Args:
-        X (numpy.ndarray): X coordinates
-        Y (numpy.ndarray): Y coordinates
-        primes (numpy.ndarray): 0 or 1
-
-    Returns:
-        float: total distance
-
-    """
-    distances = np.hypot(X-np.roll(X, shift=-1), Y-np.roll(Y, shift=-1))
-    penalties = 0.1*distances[9::10]*(1-primes[9::10])
-    print('Penalties: ')
-    return np.sum(distances)+np.sum(penalties)
-
-
-def build_distance_matrix(X, Y):
-    nb_cities = len(X)
-    distances = np.zeros((nb_cities, nb_cities))
-    for i in range(0, nb_cities):
-        for j in range(0, nb_cities):
-            distances[i][j] = math.sqrt((X[i]-X[j])**2+(Y[i]-Y[j])**2)
-    return distances
 
 # --------------------------------------
 # ACO
@@ -158,7 +108,7 @@ class ACO:
             for ind, city in enumerate(tour[1:]):
                 self.tau[tour[ind-1]][city] += dep
 
-    def select_next_city(self, current_city_id, unvisited):
+    def select_next_city(self, current_city_id, unvisited, current_step):
         """Select the next city based on the distances and the amount
         of pheronomes on the paths between cities
 
@@ -169,24 +119,31 @@ class ACO:
         Returns:
             int: id of the next city
         """
-        # TODO: add penalty for primes
+        # TODO: vectorized version
         transition_prob = np.zeros(len(unvisited))
         i = current_city_id
+        x = self.X[i]
+        y = self.Y[i]
+        # check if the penalty should be applied
+        coeff = 1
+        if current_step % 10 == 0:
+            if not self.primes[i]:
+                coeff = 1.1
+        # calculate the transition probabilities
         denominator = 0
         for m in unvisited:
             tau_im = self.tau[i][m]
-            d_im = math.sqrt((self.X[i]-self.X[m])**2+(self.Y[i]-self.Y[m])**2)
+            d_im = coeff*math.sqrt((x-self.X[m])**2+(y-self.Y[m])**2)
             denominator += math.pow(tau_im, self.alpha)/math.pow(d_im, self.beta)
         for ind, j in enumerate(unvisited):
             # calculate the probability to go from the current city to j
-            tau_ij = self.tau[i][j]  # to do: manage pheronomes
-            d_ij = math.sqrt((self.X[i]-self.X[j])**2+(self.Y[i]-self.Y[j])**2)
+            tau_ij = self.tau[i][j]
+            d_ij = coeff*math.sqrt((x-self.X[j])**2+(y-self.Y[j])**2)
             transition_prob[ind] = math.pow(tau_ij, self.alpha)/math.pow(d_ij, self.beta)/denominator
 
         # select the next city by random roulette
         # and mark the city as visited
         next_city = np.random.choice(unvisited, p=transition_prob)
-
         return next_city
 
     def select_elites(self, ants, nb_elites=2):
@@ -205,12 +162,12 @@ class ACO:
         self.init_pheronomes()
         # initialize a first generation of ants
         ants = [Ant(
-                nb_cities=self.nb_cities,
-                start_id=0,
-                start_x=self.X[0],
-                start_y=self.Y[0],
-                start_is_prime=self.primes[0]
-            ) for k in range(0, nb_ants)]
+                    nb_cities=self.nb_cities,
+                    start_id=0,
+                    start_x=self.X[0],
+                    start_y=self.Y[0],
+                    start_is_prime=self.primes[0]
+                ) for k in range(0, nb_ants)]
         elites = []
 
         generation = 0
@@ -234,7 +191,11 @@ class ACO:
                     # get the list of non visited cities
                     unvisited = ant.get_unvisited_cities()
                     # select the next city
-                    next_city = self.select_next_city(current_city_id, unvisited)
+                    next_city = self.select_next_city(
+                        current_city_id=current_city_id,
+                        unvisited=unvisited,
+                        current_step=ant.current_step
+                    )
                     # move the ant
                     ant.move_to(
                         city_id=next_city,
@@ -271,6 +232,11 @@ class ACO:
             self.add_pheronomes(ants+elites)
             self.evaporate_pheronomes()
 
+            # print some stats:
+            print('Pheronomes - min: {}, max: {}, avg: {}'.format(
+                np.min(self.tau), np.max(self.tau), np.mean(self.tau)
+            ))
+
             # select the new elites from this generation
             elites = self.select_elites(ants=ants+elites, nb_elites=nb_elites)
 
@@ -290,13 +256,24 @@ if __name__ == '__main__':
     ids, X, Y, primes = load_cities(INPUT_FILE)
 
     # for now reduces to 100 cities
-    ids = ids[0:100]
-    X = X[0:100]
-    Y = Y[0:100]
-    primes = primes[0:100]
+    ids = ids[0:50]
+    X = X[0:50]
+    Y = Y[0:50]
+    primes = primes[0:50]
 
-    aco = ACO(X, Y, primes, rho=0.1, alpha=15, beta=50)
-    best_tour, best_score, stats = aco.solve(70, 500, nb_elites=5)
+    nb_cities = len(X)
+
+    aco = ACO(X, Y, primes,
+        rho=0.4,
+        alpha=1,
+        beta=1.5,
+        Q=20
+    )
+    best_tour, best_score, stats = aco.solve(
+        nb_ants=nb_cities,
+        nb_generations=500,
+        nb_elites=5
+    )
 
     print('\nBest score: ', best_score)
 
