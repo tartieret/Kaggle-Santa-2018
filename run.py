@@ -8,7 +8,6 @@ from aco import ACO
 
 INPUT_FILE = "aug_cities.csv"
 OUTPUT_FOLDER = "output"
-OUTPUT_FILE = os.path.join(OUTPUT_FOLDER, "submission.csv")
 
 
 # --------------------------------------
@@ -18,21 +17,28 @@ OUTPUT_FILE = os.path.join(OUTPUT_FOLDER, "submission.csv")
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser(description='ACO Solver')
+    parser.add_argument('-n', '--name', help='name of experiment', action="store")
+    parser.add_argument('-g', '--generations', help='number of generations', action="store", type=int)
+    args = parser.parse_args()
+    name = args.name
+    nb_generations = args.generations
+
     print('*'*60 + '\nKaggle Sant 2018 - ACO\n' + '*'*60)
 
+    # load the grid
     ids, X, Y, primes = load_cities(INPUT_FILE)
-
     # for now reduces to 100 cities
     ids = ids[0:50]
     X = X[0:50]
     Y = Y[0:50]
     primes = primes[0:50]
 
-    nb_cities = len(X)
-    nb_generations = 200
-
     # initialize the problem
-    aco = ACO(X, Y, primes,
+    nb_cities = len(X)
+    aco = ACO(
+        name=name,
+        X=X, Y=Y, primes=primes,
         rho=0.4,
         alpha=1,
         beta=1.5,
@@ -58,16 +64,18 @@ if __name__ == '__main__':
     print('Average: {:.2f} sec / generation'.format((end-start)/aco.generation))
 
     # save the best tour to the disk
-    filename = os.path.join(OUTPUT_FOLDER, 'submission_{}.csv'.format(int(start)))
+    submission_folder = os.path.join(OUTPUT_FOLDER, name)
+    if not os.path.isdir(submission_folder):
+        os.mkdir(submission_folder)
+    filename = os.path.join(submission_folder, 'submission.csv')
     print('\nSave best tour as {}'.format(filename))
-    #with open(OUTPUT_FILE, 'w') as submission:
     with open(filename, 'w') as submission:
         submission.write('Path\n')
         for city in aco.best_tour:
             submission.write('{}\n'.format(city))
 
     # save the stats
-    stats_filename = os.path.join(OUTPUT_FOLDER, 'stats_{}.csv'.format(int(start)))
+    stats_filename = os.path.join(submission_folder, 'stats.csv')
     with open(stats_filename, 'w') as submission:
         submission.write('Gen,Score,Gain\n')
         for stat in aco.stats:

@@ -74,7 +74,8 @@ class Ant:
 
 class ACO:
 
-    def __init__(self, X, Y, primes, alpha=1, beta=5, Q=20, rho=0.9, tau_0=0.000001):
+    def __init__(self, name, X, Y, primes, alpha=1, beta=5, Q=20, rho=0.9, tau_0=0.000001):
+        self.name = name
         self.X = X
         self.Y = Y
         self.primes = primes
@@ -84,6 +85,11 @@ class ACO:
         self.rho = rho
         self.tau_0 = tau_0
         self.nb_cities = len(X)
+
+        # if necessary, create a run folder
+        self.run_folder = os.path.join(RUN_FOLDER, name)
+        if not os.path.isdir(self.run_folder):
+            os.mkdir(self.run_folder)
 
     def init_pheronomes(self):
         self.tau = self.tau_0*np.ones((self.nb_cities, self.nb_cities), dtype=np.float)
@@ -207,9 +213,9 @@ class ACO:
                 ))
 
                 # save the solution
-                pickle.dump(self.best_tour, open(os.path.join(RUN_FOLDER, 'best_tour_{}.dat'.format(self.generation)), 'wb'))
+                pickle.dump(self.best_tour, open(os.path.join(self.run_folder, 'best_tour_{}.dat'.format(self.generation)), 'wb'))
                 # save the pheronomes
-                pickle.dump(self.tau, open(os.path.join(RUN_FOLDER, 'tau_{}.dat'.format(self.generation)), 'wb'))
+                pickle.dump(self.tau, open(os.path.join(self.run_folder, 'tau_{}.dat'.format(self.generation)), 'wb'))
 
             # record the stats
             self.stats.append((self.generation, self.best_score, improvment))
