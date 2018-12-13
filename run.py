@@ -29,10 +29,10 @@ if __name__ == '__main__':
     # load the grid
     ids, X, Y, primes = load_cities(INPUT_FILE)
     # for now reduces to 100 cities
-    ids = ids[0:50]
-    X = X[0:50]
-    Y = Y[0:50]
-    primes = primes[0:50]
+    ids = ids[0:100]
+    X = X[0:100]
+    Y = Y[0:100]
+    primes = primes[0:100]
 
     # initialize the problem
     nb_cities = len(X)
@@ -42,8 +42,8 @@ if __name__ == '__main__':
         rho=0.4,
         alpha=1,
         beta=1.5,
-        Q=40,
-        tau_0=0.0001
+        Q=60,
+        tau_0=1/nb_cities*37222
     )
     # run the solver
     start = time.time()
