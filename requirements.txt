@@ -3,3 +3,5 @@ jupyter
 matplotlib
 scipy
 tqdm
+pylint
+numpy
