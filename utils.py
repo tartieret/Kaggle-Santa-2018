@@ -42,7 +42,6 @@ def distance(X, Y, primes):
     """
     distances = np.hypot(X-np.roll(X, shift=-1), Y-np.roll(Y, shift=-1))
     penalties = 0.1*distances[9::10]*(1-primes[9::10])
-    print('Penalties: ')
     return np.sum(distances)+np.sum(penalties)
 
 
