@@ -43,12 +43,3 @@ def distance(X, Y, primes):
     distances = np.hypot(X-np.roll(X, shift=-1), Y-np.roll(Y, shift=-1))
     penalties = 0.1*distances[9::10]*(1-primes[9::10])
     return np.sum(distances)+np.sum(penalties)
-
-
-def build_distance_matrix(X, Y):
-    nb_cities = len(X)
-    distances = np.zeros((nb_cities, nb_cities))
-    for i in range(0, nb_cities):
-        for j in range(0, nb_cities):
-            distances[i][j] = math.sqrt((X[i]-X[j])**2+(Y[i]-Y[j])**2)
-    return distances

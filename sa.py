@@ -10,6 +10,7 @@ import math
 import matplotlib.pyplot as plt
 import logging
 import time
+import tqdm
 
 from utils import load_cities, distance
 
@@ -91,8 +92,10 @@ class SA:
         self.N = self.problem.size
         self.T = math.sqrt(problem.size) if startingT == -1 else startingT
         self.alpha = alpha
-        self.best_solution = problem
-        self.best_fitness = problem.fitness()
+        self.current_solution = problem
+        self.current_fitness = problem.fitness()
+        self.best_fitness = self.current_fitness
+        self.best_solution = self.current_solution.copy()
         logger.info('Problem has fitness {}'.format(self.best_fitness))
 
         self.iteration = 0
@@ -115,7 +118,8 @@ class SA:
         path = [cur_node]
         free_nodes = set(nodes)
         free_nodes.remove(cur_node)
-        while free_nodes:
+        for i in tqdm.tqdm(range(1, self.N)):
+        #while free_nodes:
             # find the nearest neighbour
             next_node = min(free_nodes, key=lambda x: self.euc_dist(cur_node[1], cur_node[2], x[1], x[2]))
             free_nodes.remove(next_node)
@@ -138,22 +142,54 @@ class SA:
         logger.info('Build initial solution')
         self.current_solution, self.current_fitness = self.greedy_solution()
         if self.current_fitness < self.best_fitness:
-            self.best_solution = self.current_solution
+            self.best_solution = self.current_solution.copy()
             self.best_fitness = self.current_fitness
             logger.info('Initialization led to a better solution with fitness {}'.format(self.best_fitness))
 
     def schedule(self, T):
         return self.alpha*T
 
+    def swap(self, arr, i, k):
+        return np.concatenate((arr[0:i],arr[k:-self.N+i-1:-1],arr[k+1:self.N]))
+
+    def two_opt(self):
+        """2-opt Algorithm"""
+        improvement_threshold = 0.01
+        ids = self.current_solution.ids
+        X = self.current_solution.X
+        Y = self.current_solution.Y
+        primes = self.current_solution.primes
+        best_distance = self.current_fitness
+        improvement_factor = 1 # Initialize the improvement factor.
+        while improvement_factor > improvement_threshold: # If the route is still improving, keep going!
+            distance_to_beat = best_distance # Record the distance at the beginning of the loop.
+            for swap_first in range(1,self.N-2): # From each city except the first and last,
+                for swap_last in range(swap_first+1, self.N): # to each of the cities following,
+                    new_X = self.swap(X, swap_first, swap_last)
+                    new_Y = self.swap(Y, swap_first, swap_last)
+                    new_primes = self.swap(primes, swap_first, swap_last)
+                    new_distance = distance(new_X, new_Y, new_primes) # and check the total distance with this modification.
+                    if new_distance < self.current_fitness: # If the path distance is an improvement,
+                        ids = self.swap(ids, swap_first, swap_last)
+                        X = new_X
+                        Y = new_Y
+                        primes = new_primes
+                        best_distance = new_distance # and update the distance corresponding to this route.
+            improvement_factor = 1 - best_distance/distance_to_beat # Calculate how much the route has improved.
+
+        new_solution = TSP(ids, X, Y, primes)
+        return new_solution # When the route is no longer improving substantially, stop searching and return the route.
+
     def get_successors(self):
         """Build the list of potential successors from the current solution"""
-        i = random.randint(1, self.N - 2)
-        l = 1#random.randint(1, self.N - l)
-        candidate = self.current_solution.copy()
-        candidate.ids[i : (i + l)] = np.flip(candidate.ids[i : (i + l)])
-        candidate.X[i : (i + l)] = np.flip(candidate.X[i : (i + l)])
-        candidate.Y[i : (i + l)] = np.flip(candidate.Y[i : (i + l)])
-        candidate.primes[i : (i + l)] = np.flip(candidate.primes[i : (i + l)])
+        # i = random.randint(1, self.N - 2)
+        # l = 1#random.randint(1, self.N - l)
+        # candidate = self.current_solution.copy()
+        # candidate.ids[i : (i + l)] = np.flip(candidate.ids[i : (i + l)])
+        # candidate.X[i : (i + l)] = np.flip(candidate.X[i : (i + l)])
+        # candidate.Y[i : (i + l)] = np.flip(candidate.Y[i : (i + l)])
+        # candidate.primes[i : (i + l)] = np.flip(candidate.primes[i : (i + l)])
+        candidate =  self.two_opt()
         return [candidate]#, self.current_solution]
 
     def select_successor(self):
@@ -171,14 +207,15 @@ class SA:
         logger.info('Start Simulated Annealing - T={T} - current_fitness={fit}'.format(
             T=self.T, fit=self.current_fitness
         ))
-        self.iteration = 1
-        while self.iteration < nb_iterations and self.T > self.stopping_T:
+        for self.iteration in tqdm.tqdm(range(1, nb_iterations+1)):
+            if self.T < self.stopping_T:
+                break
             self.current_fitness = self.current_solution.fitness()
             # select the next potential solution
             successor = self.select_successor()
             successor_fitness = successor.fitness()
 
-            delta_e = successor_fitness - self.current_fitness
+            delta_e = self.current_fitness - successor_fitness
             if delta_e > 0:
                 self.current_solution = successor
                 self.current_fitness = successor_fitness
@@ -187,7 +224,7 @@ class SA:
                     self.best_solution = self.current_solution
                     self.best_fitness = self.current_fitness
 
-                    logging.info('{} - Best fitness: {}, gain: {:.2f}%'.format(
+                    logger.info('{} - Best fitness: {}, gain: {:.2f}%'.format(
                         self.iteration, self.best_fitness, improvment*100
                     ))
             else:
@@ -201,10 +238,11 @@ class SA:
             # record the stats
             self.stats.append((self.iteration, self.best_fitness, self.T))
 
-            self.iteration += 1
-
         logger.info('End Simulated Annealing - Iter={it}, T={T} - current_fitness={fit}'.format(
             it=self.iteration, T=self.T, fit=self.current_fitness
+        ))
+        logger.info('Best fitness={fit}'.format(
+            fit=self.best_fitness
         ))
 
     def save_solution(self):
@@ -262,18 +300,18 @@ if __name__ == '__main__':
     # load the grid
     ids, X, Y, primes = load_cities(INPUT_FILE)
     # for now reduces to 100 cities
-    ids = ids[0:50]
-    X = X[0:50]
-    Y = Y[0:50]
-    primes = primes[0:50]
+    # ids = ids[0:50]
+    # X = X[0:50]
+    # Y = Y[0:50]
+    # primes = primes[0:50]
 
     # define a TSP instance
     tsp = TSP(ids, X, Y, primes)
 
     # run simulated annealing optimization
-    sa = SA(name=name, problem=tsp, startingT=5000, alpha=0.998)
+    sa = SA(name=name, problem=tsp, startingT=5000, alpha=0.995)
     sa.initialize_solution()
-    sa.solve(nb_iterations=10000)
+    sa.solve(nb_iterations=1)
 
     # plot the results
     sa.plot_stats(show=False)
