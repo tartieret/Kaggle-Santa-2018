@@ -13,7 +13,7 @@ import logging
 import time
 import tqdm
 
-from utils import load_cities, distance
+from utils import load_cities
 
 INPUT_FILE = "aug_cities.csv"
 OUTPUT_FOLDER = "output"
@@ -34,22 +34,43 @@ logger.addHandler(ch)
 # TSP Model
 # -----------------------------------------------------------------------------------------
 
+ID_COL = 0
+X_COL = 1
+Y_COL = 2
+PRIME_COL = 3
+
+
+def distance(grid):
+    distances = np.hypot(
+        grid[X_COL,:]-np.roll(grid[X_COL,:], shift=-1),
+        grid[Y_COL,:]-np.roll(grid[Y_COL,:], shift=-1)
+    )
+    penalties = 0.1*distances[9::10]*(1-grid[PRIME_COL,:][9::10])
+    return np.sum(distances)+np.sum(penalties)
+
+
 class TSP:
     """Representation of a traveling salesman optimization problem.  The goal
     is to find the shortest path that visits every city in a closed loop path.
     """
 
-    def __init__(self, ids, X, Y, primes):
-        self.ids = copy.deepcopy(ids)
-        self.X = copy.deepcopy(X)
-        self.Y = copy.deepcopy(Y)
-        self.primes = copy.deepcopy(primes)
-        self.size = self.X.size
-        self.grid = np.array([ids, X, Y, primes])
+    def __init__(self, ids=None, X=None, Y=None, primes=None, grid=None):
+        """Build a TSP instance by passing either a matrix or the 4 columns
+        separately"""
+        if grid is not None:
+            self.grid = copy.deepcopy(grid)
+        else:
+            self.grid = np.array([
+                copy.deepcopy(ids),
+                copy.deepcopy(X),
+                copy.deepcopy(Y),
+                copy.deepcopy(primes)
+            ])
+        self.size = self.grid.shape[1]
 
     def copy(self):
         """Return a copy of the current state."""
-        new_tsp = TSP(self.ids, self.X, self.Y, self.primes)
+        new_tsp = TSP(grid=self.grid)
         return new_tsp
 
     def fitness(self):
@@ -63,10 +84,7 @@ class TSP:
             the cities in the order according to the self.cities list
 
         """
-        return distance(self.X, self.Y, self.primes)
-
-    def nodes(self):
-        return list(zip(self.ids, self.X, self.Y, self.primes))
+        return distance(self.grid)
 
     def save(self, filename):
         """Save the solution to the disk"""
@@ -74,7 +92,10 @@ class TSP:
             file.write("CityId,X,Y,is_prime\n")
             for i in range(0, self.size):
                 file.write('{},{},{},{}\n'.format(
-                    self.ids[i], self.X[i], self.Y[i], self.primes[i]
+                    self.grid[ID_COL, i],
+                    self.grid[X_COL, i],
+                    self.grid[Y_COL, i],
+                    self.grid[PRIME_COL, i]
                 ))
 
     @staticmethod
@@ -97,11 +118,24 @@ class TSP:
         tsp = TSP(ids, X, Y, primes)
         return tsp
 
+    def getX(self):
+        return self.grid[X_COL, :]
+
+    def getY(self):
+        return self.grid[Y_COL, :]
+
+    def getCityId(self):
+        return self.grid[ID_COL, :]
+
     def plot(self, show=True):
         """Plot a TSP path."""
         fig = plt.figure(figsize=(15, 15))
-        plt.plot(np.append(self.X, self.X[0]), np.append(self.Y, self.Y[0]), '.-', color='lightblue', alpha=0.6, label='Cities')
-        plt.plot(self.X[0], self.Y[0], 'o', color='fuchsia', label='North Pole')
+        X = self.getX()
+        X = np.append(X, X[0])
+        Y = self.getY()
+        Y = np.append(Y, Y[0])
+        plt.plot(X, Y, '.-', color='lightblue', alpha=0.6, label='Cities')
+        plt.plot(X[0], Y[0], 'o', color='fuchsia', label='North Pole')
         plt.axis('off')
         plt.legend()
         if show:
@@ -161,11 +195,7 @@ class SA:
         end_t = time.time()
 
         # format the solution
-        ids = problem.ids[new_path]
-        X = problem.X[new_path]
-        Y = problem.Y[new_path]
-        primes = problem.primes[new_path]
-        solution = TSP(ids, X, Y, primes)
+        solution = TSP(grid=problem.grid[:, new_path])
         fitness = solution.fitness()
         logger.info('Generated greedy solution in {:2f}s with fitness {}'.format(end_t-start_t, fitness))
         return solution, fitness
@@ -188,20 +218,20 @@ class SA:
             logger.info('Save initial solution to {}'.format(init_filename))
             self.current_solution.save(init_filename)
 
-
     def schedule(self, T):
         return self.alpha*T
 
-    def swap(self, arr, i, k):
-        return np.concatenate((arr[0:i], arr[k:-self.N+i-1:-1], arr[k+1:self.N]))
+    def swap(self, grid, i, k):
+        return np.concatenate((grid[:, 0:i], grid[:, k:-self.N+i-1:-1], grid[:, k+1:self.N]), axis=1)
 
     def two_opt(self, problem, fitness):
         """2-opt Algorithm"""
         improvement_threshold = 0.01
-        ids = problem.ids
-        X = problem.X
-        Y = problem.Y
-        primes = problem.primes
+        # ids = problem.ids
+        # X = problem.X
+        # Y = problem.Y
+        # primes = problem.primes
+        grid = problem.grid
         best_fitness = fitness
         improvement_factor = 1
         while improvement_factor > improvement_threshold:
@@ -212,22 +242,17 @@ class SA:
                 # to each of the cities following,
                 for swap_last in range(swap_first+1, self.N):
                     # 2-opt swap
-                    new_X = self.swap(X, swap_first, swap_last)
-                    new_Y = self.swap(Y, swap_first, swap_last)
-                    new_primes = self.swap(primes, swap_first, swap_last)
+                    new_grid = self.swap(grid, swap_first, swap_last)
                     # check the total distance with this modification.
-                    new_fitness = distance(new_X, new_Y, new_primes)
+                    new_fitness = distance(new_grid)
                     # if the new route is better save it
                     if new_fitness < best_fitness:
-                        ids = self.swap(ids, swap_first, swap_last)
-                        X = new_X
-                        Y = new_Y
-                        primes = new_primes
+                        grid = new_grid
                         best_fitness = new_fitness
             # Calculate how much the route has improved.
             improvement_factor = 1 - best_fitness/distance_to_beat
 
-        new_solution = TSP(ids, X, Y, primes)
+        new_solution = TSP(grid=grid)
         return new_solution, new_fitness
 
     def get_successors(self):
@@ -324,7 +349,7 @@ class SA:
         logger.info('Save best tour as {}'.format(filename))
         with open(filename, 'w') as submission:
             submission.write('Path\n')
-            for city in self.best_solution.ids:
+            for city in self.best_solution.getCityId():
                 submission.write('{}\n'.format(city))
 
     def save_stats(self):
@@ -363,21 +388,21 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Simulated Annealing Solver')
     parser.add_argument('-n', '--name', help='name of experiment', action="store", default='debug'),
-    parser.add_argument('-s', '--steps', help='number of steps', action="store", type=int)
+    parser.add_argument('-i', '--iterations', help='number of iterations', action="store", type=int, default=100)
     args = parser.parse_args()
     name = args.name
-    nb_steps = args.steps
+    nb_iterations = args.iterations
 
     print('*'*60 + '\nKaggle Sant 2018 - Simulated Annealing\n' + '*'*60)
 
     # load the grid
-    tsp = TSP.load_from_file('aug_cities.csv')
+    tsp = TSP.load_from_file('aug_cities50.csv')
 
     # run simulated annealing optimization
     sa = SA(name=name, problem=tsp, T_start=5000, alpha=0.995)
     sa.initialize_solution()
     try:
-        sa.solve(nb_iterations=100)
+        sa.solve(nb_iterations=nb_iterations)
     finally:
         sa.save_stats()
         sa.save_solution()
