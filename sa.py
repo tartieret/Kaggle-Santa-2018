@@ -226,46 +226,62 @@ class SA:
 
     def two_opt(self, problem, fitness):
         """2-opt Algorithm"""
-        improvement_threshold = 0.01
-        # ids = problem.ids
-        # X = problem.X
-        # Y = problem.Y
-        # primes = problem.primes
         grid = problem.grid
         best_fitness = fitness
-        improvement_factor = 1
-        while improvement_factor > improvement_threshold:
-            # Record the distance at the beginning of the loo
-            distance_to_beat = best_fitness
-            # From each city except the first and last,
-            for swap_first in range(1, self.N-2):
-                # to each of the cities following,
-                for swap_last in range(swap_first+1, self.N):
-                    # 2-opt swap
-                    new_grid = self.swap(grid, swap_first, swap_last)
-                    # check the total distance with this modification.
-                    new_fitness = distance(new_grid)
-                    # if the new route is better save it
-                    if new_fitness < best_fitness:
-                        grid = new_grid
-                        best_fitness = new_fitness
-            # Calculate how much the route has improved.
-            improvement_factor = 1 - best_fitness/distance_to_beat
+
+        # Record the distance at the beginning of the loop
+        distance_to_beat = best_fitness
+        # From each city except the first and last,
+        for i in range(1, self.N-2):
+            # to each of the cities following,
+            for k in range(i+1, self.N):
+                # 2-opt swap
+                new_grid = self.swap(grid, i, k)
+                # check the total distance with this modification.
+                # we have to recaculate the total distance as the order of cities change
+                # and therefore the penalties too
+                new_fitness = distance(new_grid)
+                # if the new route is better save it
+                if new_fitness < best_fitness:
+                    grid = new_grid
+                    best_fitness = new_fitness
+        # Calculate how much the route has improved.
+        improvement_factor = 1 - best_fitness/distance_to_beat
 
         new_solution = TSP(grid=grid)
         return new_solution, new_fitness
 
+    def random_swap(self, problem):
+        """swap the order of two consecutive cities"""
+        i = random.randint(1, self.N - 3)
+        l = random.randint(1, 3)
+        candidate = problem.copy()
+        candidate.grid[:, i:i+l] = np.flip(candidate.grid[:, i:i+l], axis=1)
+        return candidate
+
+    def move_prime(self, problem):
+        """Find prime cities that lead to penalties and move them"""
+        # select all the "prime" cities that are not located at "10th"steps
+        prime_indices = np.where(problem.grid[PRIME_COL, :]==1)[0]
+        prime_indices = prime_indices[prime_indices % 10 !=0]
+        # randomly pick one and move it to the next 10th position
+        candidate = problem.copy()
+        loc = np.random.choice(prime_indices)
+        next_loc = loc+10-loc%10
+        if next_loc < self.N:
+            candidate.grid = self.swap(candidate.grid, loc, next_loc)
+        return candidate
+
     def get_successors(self):
         """Build the list of potential successors from the current solution"""
-        # i = random.randint(1, self.N - 2)
-        # l = 1#random.randint(1, self.N - l)
-        # candidate = self.current_solution.copy()
-        # candidate.ids[i : (i + l)] = np.flip(candidate.ids[i : (i + l)])
-        # candidate.X[i : (i + l)] = np.flip(candidate.X[i : (i + l)])
-        # candidate.Y[i : (i + l)] = np.flip(candidate.Y[i : (i + l)])
-        # candidate.primes[i : (i + l)] = np.flip(candidate.primes[i : (i + l)])
-        candidate, fitness = self.two_opt(self.current_solution, self.current_fitness)
-        return [candidate]#, self.current_solution]
+        # random swap
+        candidate = self.random_swap(self.current_solution)
+        # move a prime city
+        candidate = self.move_prime(candidate)
+        # apply 2-opt
+        fitness = candidate.fitness()
+        candidate, fitness = self.two_opt(candidate, fitness)
+        return [candidate]
 
     def select_successor(self):
         """Randomly select a successor for the current solution"""
@@ -336,7 +352,9 @@ class SA:
         logger.info('Best fitness={fit}'.format(
             fit=self.best_fitness
         ))
-        logger.info('Total elapsed time: {:.2f}s'.format(time.time()-start))
+        elapsed_time = time.time()-start
+        logger.info('Total elapsed time: {:.2f} s'.format(elapsed_time))
+        logger.info('Average time / iteration: {:.3f} s'.format(elapsed_time/nb_iterations))
 
     def save_solution(self):
         """save the best tour to the disk"""
@@ -396,10 +414,10 @@ if __name__ == '__main__':
     print('*'*60 + '\nKaggle Sant 2018 - Simulated Annealing\n' + '*'*60)
 
     # load the grid
-    tsp = TSP.load_from_file('aug_cities50.csv')
+    tsp = TSP.load_from_file('aug_cities200.csv')
 
     # run simulated annealing optimization
-    sa = SA(name=name, problem=tsp, T_start=5000, alpha=0.995)
+    sa = SA(name=name, problem=tsp, T_start=5000, alpha=0.99998)
     sa.initialize_solution()
     try:
         sa.solve(nb_iterations=nb_iterations)
