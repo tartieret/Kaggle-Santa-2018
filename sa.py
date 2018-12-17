@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import logging
 import time
 import tqdm
+import numba
+from numba import jit
 
 from utils import load_cities
 
@@ -31,7 +33,7 @@ ch = logging.StreamHandler(sys.stdout)
 logger.addHandler(ch)
 
 # -----------------------------------------------------------------------------------------
-# TSP Model
+# Efficient numba functions
 # -----------------------------------------------------------------------------------------
 
 ID_COL = 0
@@ -39,14 +41,64 @@ X_COL = 1
 Y_COL = 2
 PRIME_COL = 3
 
+@jit(nopython=True)
+def roll(a, shift):
+    n = a.size
+    reshape = True
+    if n == 0:
+        return a
+    shift %= n
+    indexes = np.concatenate((np.arange(n - shift, n), np.arange(n - shift)))
+    res = a.take(indexes)
+    if reshape:
+        res = res.reshape(a.shape)
+    return res
 
+@jit(nopython=True)
 def distance(grid):
     distances = np.hypot(
-        grid[X_COL,:]-np.roll(grid[X_COL,:], shift=-1),
-        grid[Y_COL,:]-np.roll(grid[Y_COL,:], shift=-1)
+        grid[X_COL,:]-roll(grid[X_COL,:], shift=-1),
+        grid[Y_COL,:]-roll(grid[Y_COL,:], shift=-1)
     )
     penalties = 0.1*distances[9::10]*(1-grid[PRIME_COL,:][9::10])
     return np.sum(distances)+np.sum(penalties)
+
+@jit(nopython=True)
+def euc_dist(x1, y1, x2, y2):
+    return math.sqrt(math.pow(x1-x2, 2)+math.pow(y1-y2, 2))
+
+@jit(nopython=True)
+def swap(grid, i, k, N):
+    return np.concatenate((grid[:, 0:i], grid[:, k:-N+i-1:-1], grid[:, k+1:N]), axis=1)
+
+@jit(nopython=True)
+def two_opt(grid, fitness, N):
+    """2-opt Algorithm"""
+    best_fitness = fitness
+    # Record the distance at the beginning of the loop
+    distance_to_beat = best_fitness
+    # From each city except the first and last,
+    for i in range(1, N-2):
+        # to each of the cities following,
+        for k in range(i+1, N):
+            # 2-opt swap
+            new_grid = swap(grid, i, k, N)
+            # check the total distance with this modification.
+            # we have to recaculate the total distance as the order of cities change
+            # and therefore the penalties too
+            new_fitness = distance(new_grid)
+            # if the new route is better save it
+            if new_fitness < best_fitness:
+                grid = new_grid
+                best_fitness = new_fitness
+    # Calculate how much the route has improved.
+    improvement_factor = 1 - best_fitness/distance_to_beat
+    return grid, best_fitness
+
+# -----------------------------------------------------------------------------------------
+# TSP Model
+# -----------------------------------------------------------------------------------------
+
 
 
 class TSP:
@@ -141,7 +193,6 @@ class TSP:
         if show:
             plt.show()
 
-
 # -----------------------------------------------------------------------------------------
 # Simulated Annealing model
 # -----------------------------------------------------------------------------------------
@@ -170,9 +221,6 @@ class SA:
         self.submission_folder = os.path.join(OUTPUT_FOLDER, self.name)
         if not os.path.isdir(self.submission_folder):
             os.mkdir(self.submission_folder)
-
-    def euc_dist(self, x1, y1, x2, y2):
-        return math.sqrt(math.pow(x1-x2, 2)+math.pow(y1-y2, 2))
 
     def greedy_solution(self, problem):
         """Generate a greedy solution using the nearest neighbour approach"""
@@ -227,28 +275,8 @@ class SA:
     def two_opt(self, problem, fitness):
         """2-opt Algorithm"""
         grid = problem.grid
-        best_fitness = fitness
-
-        # Record the distance at the beginning of the loop
-        distance_to_beat = best_fitness
-        # From each city except the first and last,
-        for i in range(1, self.N-2):
-            # to each of the cities following,
-            for k in range(i+1, self.N):
-                # 2-opt swap
-                new_grid = self.swap(grid, i, k)
-                # check the total distance with this modification.
-                # we have to recaculate the total distance as the order of cities change
-                # and therefore the penalties too
-                new_fitness = distance(new_grid)
-                # if the new route is better save it
-                if new_fitness < best_fitness:
-                    grid = new_grid
-                    best_fitness = new_fitness
-        # Calculate how much the route has improved.
-        improvement_factor = 1 - best_fitness/distance_to_beat
-
-        new_solution = TSP(grid=grid)
+        new_grid, new_fitness = two_opt(grid, fitness, self.N)
+        new_solution = TSP(grid=new_grid)
         return new_solution, new_fitness
 
     def random_swap(self, problem):
@@ -269,7 +297,7 @@ class SA:
         loc = np.random.choice(prime_indices)
         next_loc = loc+10-loc%10
         if next_loc < self.N:
-            candidate.grid = self.swap(candidate.grid, loc, next_loc)
+            candidate.grid = swap(candidate.grid, loc, next_loc, self.N)
         return candidate
 
     def get_successors(self):
